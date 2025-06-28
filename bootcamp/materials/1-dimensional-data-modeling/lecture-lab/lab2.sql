@@ -1,16 +1,60 @@
+-- create players_scd
+create table players_scd
+(
+	player_name text,
+	scoring_class scoring_class,
+	is_active boolean,
+	start_season integer,
+	end_date integer,
+	current_season INTEGER
+);
 
-CREATE TYPE scd_type AS (
-                    scoring_class scoring_class,
-                    is_active boolean,
-                    start_season INTEGER,
-                    end_season INTEGER
-                        )
+-- insert data into it
+INSERT INTO players_scd
+WITH streak_started AS (
+    SELECT player_name,
+			is_active,
+           current_season,
+           scoring_class,
+           LAG(scoring_class, 1) OVER
+               (PARTITION BY player_name ORDER BY current_season) <> scoring_class
+               OR LAG(scoring_class, 1) OVER
+               (PARTITION BY player_name ORDER BY current_season) IS NULL
+               AS did_change
+    FROM players
+),
+     streak_identified AS (
+         SELECT
+            player_name,
+			is_active,
+                scoring_class,
+                current_season,
+            SUM(CASE WHEN did_change THEN 1 ELSE 0 END)
+                OVER (PARTITION BY player_name ORDER BY current_season) as streak_identifier
+         FROM streak_started
+     ),
+     aggregated AS (
+         SELECT
+            player_name,
+            scoring_class,
+			is_active,
+            streak_identifier,
+            MIN(current_season) AS start_date,
+            MAX(current_season) AS end_date,
+			2021 as current_season
+         FROM streak_identified
+         GROUP BY 1, 4,3,2
+		 ORDER BY 1,2
+     )
 
+     SELECT player_name, scoring_class, is_active, start_date, end_date, current_season
+     FROM aggregated
 
+-- scd 2021 vs 2022
 WITH last_season_scd AS (
     SELECT * FROM players_scd
     WHERE current_season = 2021
-    AND end_season = 2021
+    AND end_date = 2021
 ),
      historical_scd AS (
         SELECT
@@ -18,10 +62,10 @@ WITH last_season_scd AS (
                scoring_class,
                is_active,
                start_season,
-               end_season
+               end_date
         FROM players_scd
         WHERE current_season = 2021
-        AND end_season < 2021
+        AND end_date < 2021
      ),
      this_season_data AS (
          SELECT * FROM players
@@ -39,8 +83,8 @@ WITH last_season_scd AS (
         ON ls.player_name = ts.player_name
          WHERE ts.scoring_class = ls.scoring_class
          AND ts.is_active = ls.is_active
-     ),
-     changed_records AS (
+),
+	 changed_records AS (
         SELECT
                 ts.player_name,
                 UNNEST(ARRAY[
@@ -49,7 +93,6 @@ WITH last_season_scd AS (
                         ls.is_active,
                         ls.start_season,
                         ls.end_season
-
                         )::scd_type,
                     ROW(
                         ts.scoring_class,
@@ -107,4 +150,4 @@ SELECT *, 2022 AS current_season FROM (
 
                   SELECT *
                   FROM new_records
-              ) a
+              ) 
